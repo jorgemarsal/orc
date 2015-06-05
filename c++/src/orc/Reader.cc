@@ -886,6 +886,8 @@ namespace orc {
                                                       uint64_t capacity
                                                       ) const;
 
+    void finishReaderConstruction() ;
+
   public:
     /**
      * Constructor that lets the user specify additional options.
@@ -894,6 +896,20 @@ namespace orc {
      */
     ReaderImpl(std::unique_ptr<InputStream> stream,
                const ReaderOptions& options);
+
+    /**
+     * Constructor that initializes from serialized strings, not InputStream
+     * @param stream the stream to read from
+     * @param options options for reading
+     * @param serializedPostscript ORC file postscript
+     * @param serializedFooter ORC file footer
+     * @param serializedMetadata ORC file metadata
+     */
+    ReaderImpl(std::unique_ptr<InputStream> stream,
+               const ReaderOptions& options,
+               const std::string* serializedPostscript,
+               const std::string* serializedFooter,
+               const std::string* serializedMetadata);
 
     const ReaderOptions& getReaderOptions() const;
 
@@ -949,36 +965,25 @@ namespace orc {
     MemoryPool* getMemoryPool() const ;
 
     bool hasCorrectStatistics() const override;
+
+    bool serializePostscript(std::string* output) override {
+      return postscript.SerializeToString(output);
+    }
+
+    bool serializeFooter(std::string* output) override {
+      return footer.SerializeToString(output);
+    }
+
+    bool serializeMetadata(std::string* output) override {
+      return metadata.SerializeToString(output);
+    }
   };
 
   InputStream::~InputStream() {
     // PASS
   };
 
-  ReaderImpl::ReaderImpl(std::unique_ptr<InputStream> input,
-                         const ReaderOptions& opts
-                         ): stream(std::move(input)),
-                            options(opts),
-                            memoryPool(*opts.getMemoryPool()),
-                            firstRowOfStripe(memoryPool, 0) {
-    isMetadataLoaded = false;
-    // figure out the size of the file using the option or filesystem
-    uint64_t size = std::min(options.getTailLocation(),
-                                  static_cast<uint64_t>
-                                  (stream->getLength()));
-
-    //read last bytes into buffer to get PostScript
-    uint64_t readSize = std::min(size, DIRECTORY_SIZE_GUESS);
-
-    if (readSize < 1) {
-      throw ParseError("File size too small");
-    }
-
-    Buffer *buffer = stream->read(size - readSize, readSize, nullptr);
-    readPostscript(buffer);
-    readFooter(buffer, size);
-    delete buffer;
-
+  void ReaderImpl::finishReaderConstruction() {
     currentStripe = static_cast<uint64_t>(footer.stripes_size());
     lastStripe = 0;
     currentRowInStripe = 0;
@@ -990,8 +995,8 @@ namespace orc {
       proto::StripeInformation stripeInfo =
         footer.stripes(static_cast<int>(i));
       rowTotal += stripeInfo.numberofrows();
-      bool isStripeInRange = stripeInfo.offset() >= opts.getOffset() &&
-        stripeInfo.offset() < opts.getOffset() + opts.getLength();
+      bool isStripeInRange = stripeInfo.offset() >= options.getOffset() &&
+        stripeInfo.offset() < options.getOffset() + options.getLength();
       if (isStripeInRange) {
         if (i < currentStripe) {
           currentStripe = i;
@@ -1025,6 +1030,81 @@ namespace orc {
         selectTypeChildren(static_cast<size_t>(*columnId));
       }
     }
+  }
+
+  ReaderImpl::ReaderImpl(std::unique_ptr<InputStream> input,
+                         const ReaderOptions& opts
+                         ): stream(std::move(input)),
+                            options(opts),
+                            memoryPool(*opts.getMemoryPool()),
+                            firstRowOfStripe(memoryPool, 0) {
+    isMetadataLoaded = false;
+    // figure out the size of the file using the option or filesystem
+    uint64_t size = std::min(options.getTailLocation(),
+                                  static_cast<uint64_t>
+                                  (stream->getLength()));
+
+    //read last bytes into buffer to get PostScript
+    uint64_t readSize = std::min(size, DIRECTORY_SIZE_GUESS);
+
+    if (readSize < 1) {
+      throw ParseError("File size too small");
+    }
+
+    Buffer *buffer = stream->read(size - readSize, readSize, nullptr);
+    readPostscript(buffer);
+    readFooter(buffer, size);
+    delete buffer;
+
+    finishReaderConstruction();
+  }
+
+  ReaderImpl::ReaderImpl(std::unique_ptr<InputStream> input,
+                               const ReaderOptions& opts,
+                               const std::string* serializedPostscript,
+                               const std::string* serializedFooter,
+                               const std::string* serializedMetadata):
+                                   stream(std::move(input)),
+                                   options(opts),
+                                   memoryPool(*opts.getMemoryPool()),
+                                   firstRowOfStripe(memoryPool, 0) {
+    isMetadataLoaded = false;
+
+    if (serializedPostscript && serializedFooter && serializedMetadata) {
+      // Parse the postscript
+      postscriptLength = serializedPostscript->length();
+      if(!postscript.ParseFromArray(
+                        serializedPostscript->data(),
+                        static_cast<int32_t>(postscriptLength))) {
+        throw ParseError("Failed to parse the postscript");
+      }
+      if (postscript.has_compressionblocksize()) {
+        blockSize = postscript.compressionblocksize();
+      } else {
+        blockSize = 256 * 1024;
+      }
+      compression = static_cast<CompressionKind>(postscript.compression());
+
+      // Parse the footer
+      if(!footer.ParseFromArray(
+                        serializedFooter->data(),
+                        static_cast<int32_t>(serializedFooter->length()))) {
+        throw ParseError("Failed to parse the footer");
+      }
+      numberOfStripes = static_cast<uint64_t>(footer.stripes_size());
+
+      // Parse the metadata
+      if(!metadata.ParseFromArray(
+                        serializedMetadata->data(),
+                        static_cast<int32_t>(serializedMetadata->length()))) {
+        throw ParseError("Failed to parse the metadata");
+      }
+      numberOfStripeStatistics = static_cast<uint64_t>(metadata.stripestats_size());
+    } else {
+      throw ParseError("Serialized postscript, footer, and metadata must be provided");
+    }
+
+    finishReaderConstruction();
   }
 
   const ReaderOptions& ReaderImpl::getReaderOptions() const {
@@ -1576,6 +1656,21 @@ namespace orc {
   std::unique_ptr<Reader> createReader(std::unique_ptr<InputStream> stream,
                                        const ReaderOptions& options) {
     return std::unique_ptr<Reader>(new ReaderImpl(std::move(stream), options));
+  }
+
+  std::unique_ptr<Reader> createReaderSerialized(
+                                       std::unique_ptr<InputStream> stream,
+                                       const ReaderOptions& options,
+                                       const std::string* strPostscript,
+                                       const std::string* strFooter,
+                                       const std::string* strMetadata) {
+    return std::unique_ptr<Reader>(
+        new ReaderImpl(std::move(stream),
+                       options,
+                       strPostscript,
+                       strFooter,
+                       strMetadata)
+    );
   }
 
   ColumnStatistics::~ColumnStatistics() {

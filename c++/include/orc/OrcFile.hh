@@ -92,6 +92,13 @@ namespace orc {
    */
   ORC_UNIQUE_PTR<Reader> createReader(ORC_UNIQUE_PTR<InputStream> stream,
                                       const ReaderOptions& options);
+
+  ORC_UNIQUE_PTR<Reader> createReaderSerialized(
+                                        ORC_UNIQUE_PTR<InputStream> stream,
+                                        const ReaderOptions& options,
+                                        const std::string* strPostscript,
+                                        const std::string* strFooter,
+                                        const std::string* strMetadata);
 }
 
 #endif

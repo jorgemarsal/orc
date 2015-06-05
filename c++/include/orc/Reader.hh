@@ -683,6 +683,24 @@ namespace orc {
      * check file has correct column statistics
      */
     virtual bool hasCorrectStatistics() const = 0;
+
+    /*
+     * Serialize the postscript
+     * @param output string to write the serialized postscript to
+     */
+    virtual bool serializePostscript(std::string* output) = 0;
+
+    /*
+     * Serialize the footer
+     * @param output string to write the serialized footer to
+     */
+    virtual bool serializeFooter(std::string* output) = 0;
+
+    /*
+     * Serialize the metadata
+     * @param output string to write the serialized metadata to
+     */
+    virtual bool serializeMetadata(std::string* output) = 0;
   };
 }
 

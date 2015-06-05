@@ -21,6 +21,7 @@
 #include "gzip.hh"
 #include "orc/ColumnPrinter.hh"
 #include "orc/OrcFile.hh"
+#include "orc/Exceptions.hh"
 #include "ToolTest.hh"
 
 #include "wrap/gmock.h"
@@ -896,6 +897,58 @@ TEST(Reader, futureFormatVersion) {
              " was written in an unknown format version 19.99\n"),
             errorMsg.str());
   EXPECT_EQ("19.99", reader->getFormatVersion());
+}
+
+TEST(Reader, serializedConstructor) {
+  orc::ReaderOptions opts;
+  std::ostringstream filename;
+  filename << exampleDirectory << "/demo-12-zlib.orc";
+  std::unique_ptr<orc::Reader> reader =
+      orc::createReader(orc::readLocalFile(filename.str()), opts);
+
+  std::unique_ptr<orc::Reader> reader2;
+
+  EXPECT_THROW(reader2 = orc::createReaderSerialized(
+                    orc::readLocalFile(filename.str()),
+                    opts,
+                    NULL,
+                    NULL,
+                    NULL
+                    ),
+                  ParseError);
+
+  std::string postscript;
+  std::string footer;
+  std::string metadata;
+
+  EXPECT_THROW(reader2 = orc::createReaderSerialized(
+                    orc::readLocalFile(filename.str()),
+                    opts,
+                    &postscript,
+                    &footer,
+                    &metadata
+                    ),
+                  std::exception);
+
+  reader->serializePostscript(&postscript);
+  reader->serializeFooter(&footer);
+  reader->serializeMetadata(&metadata);
+
+  reader2 = orc::createReaderSerialized(
+                      orc::readLocalFile(filename.str()),
+                      opts,
+                      &postscript,
+                      &footer,
+                      &metadata
+                      );
+
+  EXPECT_EQ(1920800, reader2->getNumberOfRows());
+
+  std::unique_ptr<orc::ColumnVectorBatch> batch =
+      reader2->createRowBatch(5000); // Stripe size
+  reader2->next(*batch);
+  EXPECT_EQ(5000, batch->numElements);
+  EXPECT_EQ(0, reader2->getRowNumber());
 }
 
   std::map<std::string, std::string> makeMetadata() {

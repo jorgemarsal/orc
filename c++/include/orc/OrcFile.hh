@@ -48,7 +48,6 @@ namespace orc {
      * @param buf the starting position of a buffer.
      * @param length the number of bytes to read.
      * @param offset the position in the stream to read from.
-     * @return the number of bytes read.
      */
     virtual void read(void* buf,
                          uint64_t length,

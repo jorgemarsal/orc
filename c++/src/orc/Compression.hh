@@ -50,7 +50,10 @@ namespace orc {
    * to the protobuf readers.
    */
   class SeekableInputStream: public google::protobuf::io::ZeroCopyInputStream {
+  protected:
+    MemoryPool& pool;
   public:
+    SeekableInputStream(MemoryPool& pool);
     virtual ~SeekableInputStream();
     virtual void seek(PositionProvider& position) = 0;
     virtual std::string getName() const = 0;
@@ -61,19 +64,12 @@ namespace orc {
    */
   class SeekableArrayInputStream: public SeekableInputStream {
   private:
-    std::unique_ptr<DataBuffer<char> > ownedData;
     const char* data;
     uint64_t length;
     uint64_t position;
     uint64_t blockSize;
 
   public:
-
-    #ifdef ORC_CXX_HAS_INITIALIZER_LIST
-      SeekableArrayInputStream(std::initializer_list<unsigned char> list,
-                               int64_t block_size = -1);
-    #endif
-
     SeekableArrayInputStream(const unsigned char* list,
                              uint64_t length,
                              int64_t block_size = -1);
@@ -98,7 +94,7 @@ namespace orc {
     const uint64_t start;
     const uint64_t length;
     const uint64_t blockSize;
-    Buffer* buffer;
+    std::unique_ptr<DataBuffer<char> > buffer;
     uint64_t position;
     uint64_t pushBack;
 
@@ -106,6 +102,7 @@ namespace orc {
     SeekableFileInputStream(InputStream* input,
                             uint64_t offset,
                             uint64_t byteCount,
+                            MemoryPool& pool,
                             int64_t blockSize = -1);
     virtual ~SeekableFileInputStream();
 

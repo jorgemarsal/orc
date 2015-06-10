@@ -59,6 +59,11 @@ namespace orc {
     return result;
   }
 
+  SeekableInputStream::SeekableInputStream(
+                                        MemoryPool& _pool = *getDefaultPool()):
+                                        pool(_pool) {
+  }
+
   SeekableInputStream::~SeekableInputStream() {
     // PASS
   }
@@ -66,19 +71,6 @@ namespace orc {
   SeekableArrayInputStream::~SeekableArrayInputStream() {
     // PASS
   }
-
-  #ifdef ORC_CXX_HAS_INITIALIZER_LIST
-    SeekableArrayInputStream::SeekableArrayInputStream
-       (std::initializer_list<unsigned char> values,
-        int64_t blkSize
-        ):ownedData(new DataBuffer<char>(*getDefaultPool(), values.size())),
-          data(0) {
-      length = values.size();
-      memcpy(ownedData->data(), values.begin(), values.size());
-      position = 0;
-      blockSize = blkSize == -1 ? length : static_cast<uint64_t>(blkSize);
-    }
-  #endif
 
   SeekableArrayInputStream::SeekableArrayInputStream
                (const unsigned char* values,
@@ -90,10 +82,11 @@ namespace orc {
     blockSize = blkSize == -1 ? length : static_cast<uint64_t>(blkSize);
   }
 
-  SeekableArrayInputStream::SeekableArrayInputStream(const char* values,
-                                                     uint64_t size,
-                                                     int64_t blkSize
-                                                     ): data(values) {
+  SeekableArrayInputStream::SeekableArrayInputStream
+               (const char* values,
+                uint64_t size,
+                int64_t blkSize
+                ): data(values) {
     length = size;
     position = 0;
     blockSize = blkSize == -1 ? length : static_cast<uint64_t>(blkSize);
@@ -102,7 +95,7 @@ namespace orc {
   bool SeekableArrayInputStream::Next(const void** buffer, int*size) {
     uint64_t currentSize = std::min(length - position, blockSize);
     if (currentSize > 0) {
-      *buffer = (data ? data : ownedData->data()) + position;
+      *buffer = data + position;
       *size = static_cast<int>(currentSize);
       position += currentSize;
       return true;
@@ -158,32 +151,35 @@ namespace orc {
   SeekableFileInputStream::SeekableFileInputStream(InputStream* stream,
                                                    uint64_t offset,
                                                    uint64_t byteCount,
+                                                   MemoryPool& _pool,
                                                    int64_t _blockSize
-                                                   ): input(stream),
+                                                   ): SeekableInputStream(_pool),
+                                                      input(stream),
                                                       start(offset),
                                                       length(byteCount),
                                                       blockSize(computeBlock
                                                                 (_blockSize,
                                                                  length)) {
     position = 0;
-    buffer = nullptr;
+    buffer.reset(new DataBuffer<char>(pool));
     pushBack = 0;
   }
 
   SeekableFileInputStream::~SeekableFileInputStream() {
-    delete buffer;
+    // PASS
   }
 
   bool SeekableFileInputStream::Next(const void** data, int*size) {
     uint64_t bytesRead;
     if (pushBack != 0) {
-      *data = buffer->getStart() + (buffer->getLength() - pushBack);
+      *data = buffer->data() + (buffer->size() - pushBack);
       bytesRead = pushBack;
     } else {
       bytesRead = std::min(length - position, blockSize);
+      buffer->resize(bytesRead);
       if (bytesRead > 0) {
-        buffer = input->read(start + position, bytesRead, buffer);
-        *data = static_cast<void*>(buffer->getStart());
+        input->read(buffer->data(), bytesRead, start+position);
+        *data = static_cast<void*>(buffer->data());
       }
     }
     position += bytesRead;
@@ -299,7 +295,6 @@ namespace orc {
       }
     }
 
-    MemoryPool& pool;
     const size_t blockSize;
     std::unique_ptr<SeekableInputStream> input;
     z_stream zstream;
@@ -332,7 +327,7 @@ DIAGNOSTIC_IGNORE("-Wold-style-cast")
                    (std::unique_ptr<SeekableInputStream> inStream,
                     size_t _blockSize,
                     MemoryPool& _pool
-                    ): pool(_pool),
+                    ): SeekableInputStream(_pool),
                        blockSize(_blockSize),
                        buffer(pool, _blockSize) {
     input.reset(inStream.release());
@@ -564,7 +559,6 @@ DIAGNOSTIC_POP
     }
 
     std::unique_ptr<SeekableInputStream> input;
-    MemoryPool& pool;
 
     // may need to stitch together multiple input buffers;
     // to give snappy a contiguous block
@@ -596,7 +590,7 @@ DIAGNOSTIC_POP
                    (std::unique_ptr<SeekableInputStream> inStream,
                     size_t bufferSize,
                     MemoryPool& _pool
-                    ) : pool(_pool),
+                    ) : SeekableInputStream(_pool),
                         inputBuffer(pool, bufferSize),
                         outputBuffer(pool, bufferSize),
                         state(DECOMPRESS_HEADER),

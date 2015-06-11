@@ -53,7 +53,7 @@ namespace orc {
   protected:
     MemoryPool& pool;
   public:
-    SeekableInputStream(MemoryPool& pool);
+    SeekableInputStream(MemoryPool& pool = *getDefaultPool());
     virtual ~SeekableInputStream();
     virtual void seek(PositionProvider& position) = 0;
     virtual std::string getName() const = 0;

@@ -59,10 +59,7 @@ namespace orc {
     return result;
   }
 
-  SeekableInputStream::SeekableInputStream(
-                                        MemoryPool& _pool = *getDefaultPool()):
-                                        pool(_pool) {
-  }
+  SeekableInputStream::SeekableInputStream(MemoryPool& _pool): pool(_pool) {}
 
   SeekableInputStream::~SeekableInputStream() {
     // PASS

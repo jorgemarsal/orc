@@ -16,13 +16,15 @@
 * limitations under the License.
 */
 
-#include "orc/C09Adapter.hh"
+//#include "orc/C09Adapter.hh"
 #include <sstream>
 
-int64_t std::stoll(std::string str) {
+namespace std {
+int64_t stoll(std::string str) {
   int64_t val = 0;
   stringstream ss ;
   ss << str ;
   ss >> val ;
   return val;
+}
 }

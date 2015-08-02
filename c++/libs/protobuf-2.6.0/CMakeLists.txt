@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CXX11_FLAGS}")
+
 INCLUDE (CheckIncludeFileCXX)
 CHECK_INCLUDE_FILE_CXX("tr1/unordered_map" HAVE_TR1)
 CONFIGURE_FILE(config.h.cmake
